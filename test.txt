@@ -58,11 +58,11 @@ model.fit(X_train, y_train, epochs=10, batch_size=128, validation_data=(X_test, 
 def generate_shortname(full_name, diversity=1.0):
     new_name = '<start>' + full_name + '<end>'
     for _ in range(12):  # Ograniczenie do 12 znaków
-        tokenized_text = tokenizer.texts_to_sequences([new_name])[0]
+        tokenized_text = tokenizer.texts_to_sequences([new_name])[-1]  # Bierzemy tylko ostatnią sekwencję
         tokenized_text = pad_sequences([tokenized_text], maxlen=max_seq_length - 1, padding='post')
-        predictions = model.predict(tokenized_text, verbose=0)[0]
+        predictions = model.predict(tokenized_text, verbose=0)[0]  # [0] aby wziąć pierwszą (i jedyną) sekwencję
         next_index = sample(predictions, diversity)
-        new_char = tokenizer.index_word[next_index]
+        new_char = tokenizer.index_word.get(next_index, '')  # Użyj metody get dla bezpieczeństwa
         new_name += new_char
         if new_char == '<end>':
             break
@@ -70,7 +70,7 @@ def generate_shortname(full_name, diversity=1.0):
 
 def sample(preds, temperature=1.0):
     preds = np.asarray(preds).astype('float64')
-    preds = np.log(preds + 1e-7) / temperature
+    preds = np.log(preds + 1e-7) / temperature  # Dodajemy niewielką wartość, aby uniknąć dzielenia przez zero
     exp_preds = np.exp(preds)
     preds = exp_preds / np.sum(exp_preds)
     probas = np.random.multinomial(1, preds, 1)
