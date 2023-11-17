@@ -1,44 +1,70 @@
+import numpy as np
+import pandas as pd
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Embedding, LSTM, Dense
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
 
-# Przygotowanie danych (jak wcześniej opisano)
+# Załaduj dane
+data = pd.read_csv('twoje_dane.csv')  # Plik CSV z kolumnami 'full_name' i 'short_name'
 
-# Tokenizacja
-tokenizer = Tokenizer(char_level=True)  # Tokenizacja na poziomie znaków
-tokenizer.fit_on_texts(data['nazwa_pełna'])
+# Przygotowanie danych
+# Zbuduj pełne sekwencje w formacie: "<start>full_name<end>short_name"
+data['sequence'] = '<start>' + data['full_name'] + '<end>' + data['short_name']
+
+# Tokenizacja na poziomie znaków
+tokenizer = Tokenizer(char_level=True)
+tokenizer.fit_on_texts(data['sequence'])
 
 # Konwersja tekstu na sekwencje
-sequences = tokenizer.texts_to_sequences(data['nazwa_pełna'])
+sequences = tokenizer.texts_to_sequences(data['sequence'])
 
 # Padding sekwencji
-max_seq_length = max([len(seq) for seq in sequences])
+max_seq_length = max([len(seq) for seq in sequences])  # Maksymalna długość sekwencji
 sequences_padded = pad_sequences(sequences, maxlen=max_seq_length, padding='post')
+
+# Przygotowanie danych do trenowania (X i y)
+X = []
+y = []
+for seq in sequences_padded:
+    X.append(seq[:-1])  # Wszystkie znaki oprócz ostatniego
+    y.append(seq[1:])   # Wszystkie znaki oprócz pierwszego
+
+X = np.array(X)
+y = np.array(y)
+y = to_categorical(y, num_classes=len(tokenizer.word_index) + 1)
+
+# Podział na dane treningowe i testowe
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # Budowa modelu
 model = Sequential([
-    Embedding(input_dim=len(tokenizer.word_index) + 1, output_dim=64, input_length=max_seq_length),
+    Embedding(input_dim=len(tokenizer.word_index) + 1, output_dim=64, input_length=max_seq_length - 1),
     LSTM(128, return_sequences=True),
-    LSTM(128),
-    Dense(64, activation='relu'),
+    LSTM(128, return_sequences=True),
     Dense(len(tokenizer.word_index) + 1, activation='softmax')
 ])
 
 model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
 
 # Trenowanie modelu
-model.fit(X_train_pad, y_train, epochs=10, validation_data=(X_test_pad, y_test))
-
+model.fit(X_train, y_train, epochs=10, batch_size=128, validation_data=(X_test, y_test))
 
 # Funkcja do generowania nowych nazw
-def generate_shortname(seed_text, num_chars=10):
-    for _ in range(num_chars):
-        tokenized_text = tokenizer.texts_to_sequences([seed_text])[0]
-        tokenized_text = pad_sequences([tokenized_text], maxlen=max_seq_length, padding='post')
-        predicted_char_index = model.predict_classes(tokenized_text, verbose=0)
-        seed_text += tokenizer.index_word[predicted_char_index]
-    return seed_text
+def generate_shortname(full_name):
+    new_name = '<start>' + full_name + '<end>'
+    for _ in range(12):  # Ograniczenie do 12 znaków
+        tokenized_text = tokenizer.texts_to_sequences([new_name])[0]
+        tokenized_text = pad_sequences([tokenized_text], maxlen=max_seq_length - 1, padding='post')
+        predicted_char_index = np.argmax(model.predict(tokenized_text, verbose=0), axis=-1)
+        new_char = tokenizer.index_word[predicted_char_index[-1]]
+        new_name += new_char
+        if new_char == '<end>':
+            break
+    return new_name.split('<end>')[1]
 
 # Generowanie nowej nazwy
-new_shortname = generate_shortname("Początek Nazwy")
+new_shortname = generate_shortname("Przykładowa Firma")
+print(new_shortname)
