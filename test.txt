@@ -55,18 +55,26 @@ model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accur
 # Trenowanie modelu
 model.fit(X_train, y_train, epochs=10, batch_size=128, validation_data=(X_test, y_test))
 
-# Funkcja do generowania nowych nazw
-def generate_shortname(full_name):
+def generate_shortname(full_name, diversity=1.0):
     new_name = '<start>' + full_name + '<end>'
     for _ in range(12):  # Ograniczenie do 12 znaków
         tokenized_text = tokenizer.texts_to_sequences([new_name])[0]
         tokenized_text = pad_sequences([tokenized_text], maxlen=max_seq_length - 1, padding='post')
-        predicted_char_index = np.argmax(model.predict(tokenized_text, verbose=0), axis=-1)
-        new_char = tokenizer.index_word[predicted_char_index[0]]
+        predictions = model.predict(tokenized_text, verbose=0)[0]
+        next_index = sample(predictions, diversity)
+        new_char = tokenizer.index_word[next_index]
         new_name += new_char
         if new_char == '<end>':
             break
     return new_name.split('<end>')[1]
+
+def sample(preds, temperature=1.0):
+    preds = np.asarray(preds).astype('float64')
+    preds = np.log(preds + 1e-7) / temperature
+    exp_preds = np.exp(preds)
+    preds = exp_preds / np.sum(exp_preds)
+    probas = np.random.multinomial(1, preds, 1)
+    return np.argmax(probas)
 
 # Generowanie nowej nazwy
 new_shortname = generate_shortname("Przykładowa Firma")
