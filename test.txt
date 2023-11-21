@@ -1,81 +1,79 @@
-import numpy as np
+import dash
+from dash import html, dcc, dash_table
+from dash.dependencies import Input, Output, State
 import pandas as pd
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Embedding, LSTM, Dense, Dropout
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.regularizers import l2
-from sklearn.model_selection import train_test_split
 
-# Załaduj dane
-data = pd.read_csv('twoje_dane.csv')  # Plik CSV z kolumnami 'full_name' i 'short_name'
+# Przykładowe dane i lista wartości 'red_values'
+data = pd.DataFrame({'Number': [1, 2, 3], 'Name': ['A', 'B', 'C']})
+red_values = ['A', 'C']
 
-# Przygotowanie danych
-# Zbuduj pełne sekwencje w formacie: "<start>full_name<end>short_name"
-data['sequence'] = '<start>' + data['full_name'] + '<end>' + data['short_name']
+app = dash.Dash(__name__)
 
-# Tokenizacja na poziomie znaków
-tokenizer = Tokenizer(char_level=True)
-tokenizer.fit_on_texts(data['sequence'])
-
-# Konwersja tekstu na sekwencje
-sequences = tokenizer.texts_to_sequences(data['sequence'])
-
-# Padding sekwencji
-max_seq_length = max([len(seq) for seq in sequences])  # Maksymalna długość sekwencji
-sequences_padded = pad_sequences(sequences, maxlen=max_seq_length, padding='post')
-
-# Przygotowanie danych do trenowania (X i y)
-X = []
-y = []
-for seq in sequences_padded:
-    X.append(seq[:-1])  # Wszystkie znaki oprócz ostatniego
-    y.append(seq[-1])   # Tylko ostatni znak
-
-X = np.array(X)
-y = np.array(y)
-y = to_categorical(y, num_classes=len(tokenizer.word_index) + 1)
-
-# Podział na dane treningowe i testowe
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Budowa modelu
-model = Sequential([
-    Embedding(input_dim=len(tokenizer.word_index) + 1, output_dim=128, input_length=max_seq_length - 1),
-    LSTM(256, return_sequences=True, dropout=0.2, recurrent_dropout=0.2, kernel_regularizer=l2(0.001)),
-    Dropout(0.2),
-    LSTM(256, dropout=0.2, recurrent_dropout=0.2, kernel_regularizer=l2(0.001)),
-    Dropout(0.2),
-    Dense(len(tokenizer.word_index) + 1, activation='softmax')
+# Layout aplikacji
+app.layout = html.Div([
+    dash_table.DataTable(
+        id='table1',
+        columns=[{"name": i, "id": i} for i in data.columns],
+        data=data.to_dict('records'),
+        editable=True
+    ),
+    html.Button('Generate Table', id='generate-button'),
+    html.Div(id='table-container')
 ])
 
-model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+# Callback do generowania drugiej tabeli
+@app.callback(
+    Output('table-container', 'children'),
+    Input('generate-button', 'n_clicks'),
+    State('table1', 'data')
+)
+def generate_table(n_clicks, rows):
+    if n_clicks is None:
+        return dash.no_update
 
-# Trenowanie modelu
-model.fit(X_train, y_train, epochs=10, batch_size=128, validation_data=(X_test, y_test))
+    return dash_table.DataTable(
+        id='table2',
+        columns=[{"name": i, "id": i} for i in data.columns],
+        data=rows,
+        editable=True,
+        style_data_conditional=[
+            {
+                'if': {'filter_query': '{{Name}} = {}'.format(name)},
+                'backgroundColor': 'red'
+            } for name in red_values
+        ]
+    )
 
-def generate_shortname(full_name, diversity=1.0):
-    new_name = '<start>' + full_name + '<end>'
-    for _ in range(12):  # Ograniczenie do 12 znaków
-        tokenized_text = tokenizer.texts_to_sequences([new_name])[-1]  # Bierzemy tylko ostatnią sekwencję
-        tokenized_text = pad_sequences([tokenized_text], maxlen=max_seq_length - 1, padding='post')
-        predictions = model.predict(tokenized_text, verbose=0)[0]  # [0] aby wziąć pierwszą (i jedyną) sekwencję
-        next_index = sample(predictions, diversity)
-        new_char = tokenizer.index_word.get(next_index, '')  # Użyj metody get dla bezpieczeństwa
-        new_name += new_char
-        if new_char == '<end>':
-            break
-    return new_name.split('<end>')[1]
+# Callback do aktualizacji formatowania w drugiej tabeli
+@app.callback(
+    Output('table2', 'style_data_conditional'),
+    Input('table2', 'data')
+)
+def update_styles(rows):
+    return [
+        {
+            'if': {'filter_query': '{{Name}} = {}'.format(name)},
+            'backgroundColor': 'red' if name in red_values else ''
+        } for row in rows for name in [row['Name']]
+    ]
 
-def sample(preds, temperature=1.0):
-    preds = np.asarray(preds).astype('float64')
-    preds = np.log(preds + 1e-7) / temperature  # Dodajemy niewielką wartość, aby uniknąć dzielenia przez zero
-    exp_preds = np.exp(preds)
-    preds = exp_preds / np.sum(exp_preds)
-    probas = np.random.multinomial(1, preds, 1)
-    return np.argmax(probas)
+# Dodaj CSS do aplikacji
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        const style = document.createElement('style');
+        style.innerHTML = `
+            .dash-cell.focused {
+                outline: none;
+                cursor: text;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    """,
+    Output('dummy-div', 'children'),
+    Input('generate-button', 'n_clicks')
+)
 
-# Generowanie nowej nazwy
-new_shortname = generate_shortname("Przykładowa Firma")
-print(new_shortname)
+if __name__ == '__main__':
+    app.run_server(debug=True)
