@@ -1,78 +1,46 @@
 import dash
 from dash import html, dcc, dash_table
-from dash.dependencies import Input, Output, State
+from dash.dependencies import ClientsideFunction, Input, Output, State
 import pandas as pd
 
-# Przykładowe dane i lista wartości 'red_values'
-data = pd.DataFrame({'Number': [1, 2, 3], 'Name': ['A', 'B', 'C']})
-red_values = ['A', 'C']
+# Przykładowe dane
+data = pd.DataFrame({
+    'ID': [1, 2, 3],
+    'Name': ['Alice', 'Bob', 'Charlie']
+})
 
 app = dash.Dash(__name__)
 
-# Layout aplikacji
 app.layout = html.Div([
     dash_table.DataTable(
-        id='table1',
+        id='table',
         columns=[{"name": i, "id": i} for i in data.columns],
         data=data.to_dict('records'),
         editable=True
     ),
-    html.Button('Generate Table', id='generate-button'),
-    html.Div(id='table-container')
+    html.Div(id='dummy-div')  # Pusty div dla callbacku
 ])
 
-# Callback do generowania drugiej tabeli
-@app.callback(
-    Output('table-container', 'children'),
-    Input('generate-button', 'n_clicks'),
-    State('table1', 'data')
-)
-def generate_table(n_clicks, rows):
-    if n_clicks is None:
-        return dash.no_update
-
-    return dash_table.DataTable(
-        id='table2',
-        columns=[{"name": i, "id": i} for i in data.columns],
-        data=rows,
-        editable=True,
-        style_data_conditional=[
-            {
-                'if': {'filter_query': '{{Name}} = {}'.format(name)},
-                'backgroundColor': 'red'
-            } for name in red_values
-        ]
-    )
-
-# Callback do aktualizacji formatowania w drugiej tabeli
-@app.callback(
-    Output('table2', 'style_data_conditional'),
-    Input('table2', 'data')
-)
-def update_styles(rows):
-    return [
-        {
-            'if': {'filter_query': '{{Name}} = {}'.format(name)},
-            'backgroundColor': 'red' if name in red_values else ''
-        } for row in rows for name in [row['Name']]
-    ]
-
-# Dodaj CSS do aplikacji
+# Clientside callback do automatycznego zapisywania
 app.clientside_callback(
     """
-    function(n_clicks) {
-        const style = document.createElement('style');
-        style.innerHTML = `
-            .dash-cell.focused {
-                outline: none;
-                cursor: text;
+    function(data) {
+        var table = document.getElementById('table');
+        if (table) {
+            var editableCells = table.getElementsByClassName('dash-cell-value');
+
+            for (var i = 0; i < editableCells.length; i++) {
+                editableCells[i].addEventListener('blur', function(event) {
+                    var cell = event.target;
+                    cell.dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}));
+                });
             }
-        `;
-        document.head.appendChild(style);
+        }
     }
     """,
     Output('dummy-div', 'children'),
-    Input('generate-button', 'n_clicks')
+    [Input('table', 'data_timestamp')],
+    [State('table', 'data')]
 )
 
 if __name__ == '__main__':
