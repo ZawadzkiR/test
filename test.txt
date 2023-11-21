@@ -1,47 +1,85 @@
 import dash
 from dash import html, dcc, dash_table
-from dash.dependencies import ClientsideFunction, Input, Output, State
+from dash.dependencies import Input, Output, State
 import pandas as pd
 
 # Przykładowe dane
-data = pd.DataFrame({
-    'ID': [1, 2, 3],
-    'Name': ['Alice', 'Bob', 'Charlie']
-})
+data = pd.DataFrame({'Number': [1, 2, 3], 'Name': ['A', 'B', 'C']})
+df2 = pd.DataFrame({'Number': [1, 2, 3, 4, 5], 'Name': ['A', 'B', 'C', 'D', 'E']})  # Dodatkowy DataFrame
+red_values = ['A', 'C']
 
 app = dash.Dash(__name__)
 
+# Layout aplikacji
 app.layout = html.Div([
     dash_table.DataTable(
-        id='table',
+        id='table1',
         columns=[{"name": i, "id": i} for i in data.columns],
         data=data.to_dict('records'),
         editable=True
     ),
-    html.Div(id='dummy-div')  # Pusty div dla callbacku
+    html.Button('Add Row', id='add-row-button'),
+    html.Button('Generate Table', id='generate-button'),
+    html.Div(id='table-container')
 ])
 
-# Clientside callback do automatycznego zapisywania
-app.clientside_callback(
-    """
-    function(data) {
-        var table = document.getElementById('table');
-        if (table) {
-            var editableCells = table.getElementsByClassName('dash-cell-value');
-
-            for (var i = 0; i < editableCells.length; i++) {
-                editableCells[i].addEventListener('blur', function(event) {
-                    var cell = event.target;
-                    cell.dispatchEvent(new KeyboardEvent('keydown', {'key': 'Enter'}));
-                });
-            }
-        }
-    }
-    """,
-    Output('dummy-div', 'children'),
-    [Input('table', 'data_timestamp')],
-    [State('table', 'data')]
+# Callback do dodawania pustego wiersza do table1
+@app.callback(
+    Output('table1', 'data'),
+    Input('add-row-button', 'n_clicks'),
+    State('table1', 'data')
 )
+def add_row(n_clicks, rows):
+    if n_clicks is None:
+        return dash.no_update
+    rows.append({col: '' for col in data.columns})
+    return rows
+
+# Callback do generowania drugiej tabeli na podstawie df2
+@app.callback(
+    Output('table-container', 'children'),
+    Input('generate-button', 'n_clicks'),
+    State('table1', 'data')
+)
+def generate_table(n_clicks, rows):
+    if n_clicks is None:
+        return dash.no_update
+
+    # Filtrowanie df2 na podstawie wartości z table1
+    filter_values = [row['Name'] for row in rows if row['Name']]
+    filtered_df2 = df2[df2['Name'].isin(filter_values)]
+
+    return dash_table.DataTable(
+        id='table2',
+        columns=[{"name": i, "id": i} for i in filtered_df2.columns],
+        data=filtered_df2.to_dict('records'),
+        editable=True,
+        style_data_conditional=[
+            {
+                'if': {
+                    'column_id': 'Name',
+                    'filter_query': '{{Name}} = {}'.format(name)
+                },
+                'backgroundColor': 'red'
+            } for name in red_values
+        ]
+    )
+
+# Callback do aktualizacji formatowania w drugiej tabeli
+@app.callback(
+    Output('table2', 'style_data_conditional'),
+    Input('table2', 'data')
+)
+def update_styles(rows):
+    return [
+        {
+            'if': {
+                'column_id': 'Name',
+                'filter_query': '{{Name}} = {}'.format(name)
+            },
+            'backgroundColor': 'red' if name in red_values else ''
+        } for row in rows for name in [row['Name']]
+    ]
 
 if __name__ == '__main__':
     app.run_server(debug=True)
