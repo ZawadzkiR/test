@@ -3,9 +3,11 @@ from dash import html, dcc, dash_table
 from dash.dependencies import Input, Output, State
 import pandas as pd
 
-# Przykładowe dane
+# Przykładowe dane dla table1
 data = pd.DataFrame({'Number': [1, 2, 3], 'Name': ['A', 'B', 'C']})
-df2 = pd.DataFrame({'Number': [1, 2, 3, 4, 5], 'Name': ['A', 'B', 'C', 'D', 'E']})  # Dodatkowy DataFrame
+
+# DataFrame df2 z zmienioną nazwą kolumny na 'NAME'
+df2 = pd.DataFrame({'Value': [1, 2, 3, 4, 5], 'NAME': ['A', 'B', 'C', 'D', 'E']})
 red_values = ['A', 'C']
 
 app = dash.Dash(__name__)
@@ -45,9 +47,9 @@ def generate_table(n_clicks, rows):
     if n_clicks is None:
         return dash.no_update
 
-    # Filtrowanie df2 na podstawie wartości z table1
+    # Filtrowanie df2 na podstawie wartości z table1, używając kolumny 'NAME'
     filter_values = [row['Name'] for row in rows if row['Name']]
-    filtered_df2 = df2[df2['Name'].isin(filter_values)]
+    filtered_df2 = df2[df2['NAME'].isin(filter_values)]
 
     return dash_table.DataTable(
         id='table2',
@@ -57,29 +59,13 @@ def generate_table(n_clicks, rows):
         style_data_conditional=[
             {
                 'if': {
-                    'column_id': 'Name',
-                    'filter_query': '{{Name}} = {}'.format(name)
+                    'column_id': 'NAME',  # Zmieniono na 'NAME'
+                    'filter_query': '{{NAME}} = "{}"'.format(name)  # Zaktualizowano format
                 },
                 'backgroundColor': 'red'
             } for name in red_values
         ]
     )
-
-# Callback do aktualizacji formatowania w drugiej tabeli
-@app.callback(
-    Output('table2', 'style_data_conditional'),
-    Input('table2', 'data')
-)
-def update_styles(rows):
-    return [
-        {
-            'if': {
-                'column_id': 'Name',
-                'filter_query': '{{Name}} = {}'.format(name)
-            },
-            'backgroundColor': 'red' if name in red_values else ''
-        } for row in rows for name in [row['Name']]
-    ]
 
 if __name__ == '__main__':
     app.run_server(debug=True)
