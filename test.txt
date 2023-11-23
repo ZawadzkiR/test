@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.layers import Input, LSTM, Embedding, Dense
@@ -54,11 +55,29 @@ y_train_dec_output = pad_sequences(y_train, maxlen=max_len_shortnames, padding='
 # Trenowanie modelu
 model.fit([X_train, y_train_dec_input], np.expand_dims(y_train_dec_output, -1), batch_size=32, epochs=50, validation_split=0.2)
 
+# Model enkodera
+encoder_model = Model(encoder_inputs, encoder_states)
+
+# Model dekodera
+decoder_state_input_h = Input(shape=(50,))
+decoder_state_input_c = Input(shape=(50,))
+decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
+
+dec_emb2 = dec_emb_layer(decoder_inputs)  # Ponowne użycie warstwy Embedding
+
+decoder_outputs2, state_h2, state_c2 = decoder_lstm(dec_emb2, initial_state=decoder_states_inputs)
+decoder_states2 = [state_h2, state_c2]
+decoder_outputs2 = decoder_dense(decoder_outputs2)
+
+decoder_model = Model(
+    [decoder_inputs] + decoder_states_inputs,
+    [decoder_outputs2] + decoder_states2)
+
 # Funkcja do generowania skróconych nazw
 def generate_shortname(model, full_name):
     full_name_seq = tokenizer.texts_to_sequences([full_name])
     full_name_padded = pad_sequences(full_name_seq, maxlen=max_len_full_names, padding='post')
-    state = encoder_model.predict(full_name_padded)
+    state_values = encoder_model.predict(full_name_padded)
     
     target_seq = np.zeros((1, 1))
     target_seq[0, 0] = tokenizer.word_index['start']  # start token
@@ -66,23 +85,23 @@ def generate_shortname(model, full_name):
     stop_condition = False
     shortname = ''
     while not stop_condition:
-        output_tokens, h, c = decoder_model.predict([target_seq] + state)
+        output_tokens, h, c = decoder_model.predict([target_seq] + state_values)
 
-        # Sample a token
+        # Wybór tokenu
         sampled_token_index = np.argmax(output_tokens[0, -1, :])
-        sampled_char = reverse_word_index[sampled_token_index]
+        sampled_char = [word for word, index in tokenizer.word_index.items() if index == sampled_token_index][0]
         shortname += sampled_char
 
-        # Exit condition: either hit max length or find stop character.
+        # Warunek zakończenia
         if (sampled_char == 'end' or len(shortname) > max_len_shortnames):
             stop_condition = True
 
-        # Update the target sequence (of length 1).
+        # Aktualizacja sekwencji celu
         target_seq = np.zeros((1, 1))
         target_seq[0, 0] = sampled_token_index
 
-        # Update states
-        state = [h, c]
+        # Aktualizacja stanów
+        state_values = [h, c]
 
     return shortname
 
