@@ -1,71 +1,90 @@
-import dash
-from dash import html, dcc, dash_table
-from dash.dependencies import Input, Output, State
-import pandas as pd
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.layers import Input, LSTM, Embedding, Dense
+from tensorflow.keras.models import Model
+from tensorflow.keras.preprocessing.text import Tokenizer
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-# Przykładowe dane dla table1
-data = pd.DataFrame({'Number': [1, 2, 3], 'Name': ['A', 'B', 'C']})
+# Przykładowe dane (zastąp je swoimi danymi)
+full_names = ['Spółka XYZ w Pcimiu', 'Inna Firma AB', ...]
+shortnames = ['XYZ-PCI', 'IF-AB', ...]
 
-# DataFrame df2 z zmienioną nazwą kolumny na 'NAME'
-df2 = pd.DataFrame({'Value': [1, 2, 3, 4, 5], 'NAME': ['A', 'B', 'C', 'D', 'E']})
-red_values = ['A', 'C']
+# Tokenizacja i padding
+tokenizer = Tokenizer(char_level=True)
+tokenizer.fit_on_texts(full_names + shortnames)
+full_names_seq = tokenizer.texts_to_sequences(full_names)
+shortnames_seq = tokenizer.texts_to_sequences(shortnames)
 
-app = dash.Dash(__name__)
+full_names_padded = pad_sequences(full_names_seq, padding='post')
+shortnames_padded = pad_sequences(shortnames_seq, padding='post')
 
-# Layout aplikacji
-app.layout = html.Div([
-    dash_table.DataTable(
-        id='table1',
-        columns=[{"name": i, "id": i} for i in data.columns],
-        data=data.to_dict('records'),
-        editable=True
-    ),
-    html.Button('Add Row', id='add-row-button'),
-    html.Button('Generate Table', id='generate-button'),
-    html.Div(id='table-container')
-])
+# Rozmiar słownika i długości sekwencji
+vocab_size = len(tokenizer.word_index) + 1
+max_len_full_names = max([len(seq) for seq in full_names_seq])
+max_len_shortnames = max([len(seq) for seq in shortnames_seq])
 
-# Callback do dodawania pustego wiersza do table1
-@app.callback(
-    Output('table1', 'data'),
-    Input('add-row-button', 'n_clicks'),
-    State('table1', 'data')
-)
-def add_row(n_clicks, rows):
-    if n_clicks is None:
-        return dash.no_update
-    rows.append({col: '' for col in data.columns})
-    return rows
+# Podział na zestaw treningowy i testowy
+X_train, X_test, y_train, y_test = train_test_split(full_names_padded, shortnames_padded, test_size=0.2)
 
-# Callback do generowania drugiej tabeli na podstawie df2
-@app.callback(
-    Output('table-container', 'children'),
-    Input('generate-button', 'n_clicks'),
-    State('table1', 'data')
-)
-def generate_table(n_clicks, rows):
-    if n_clicks is None:
-        return dash.no_update
+# Budowa modelu seq2seq
+# Enkoder
+encoder_inputs = Input(shape=(None,))
+enc_emb = Embedding(vocab_size, 10)(encoder_inputs)
+encoder_lstm = LSTM(50, return_state=True)
+encoder_outputs, state_h, state_c = encoder_lstm(enc_emb)
+encoder_states = [state_h, state_c]
 
-    # Filtrowanie df2 na podstawie wartości z table1, używając kolumny 'NAME'
-    filter_values = [row['Name'] for row in rows if row['Name']]
-    filtered_df2 = df2[df2['NAME'].isin(filter_values)]
+# Dekoder
+decoder_inputs = Input(shape=(None,))
+dec_emb_layer = Embedding(vocab_size, 10)
+dec_emb = dec_emb_layer(decoder_inputs)
+decoder_lstm = LSTM(50, return_sequences=True, return_state=True)
+decoder_outputs, _, _ = decoder_lstm(dec_emb, initial_state=encoder_states)
+decoder_dense = Dense(vocab_size, activation='softmax')
+decoder_outputs = decoder_dense(decoder_outputs)
 
-    return dash_table.DataTable(
-        id='table2',
-        columns=[{"name": i, "id": i} for i in filtered_df2.columns],
-        data=filtered_df2.to_dict('records'),
-        editable=True,
-        style_data_conditional=[
-            {
-                'if': {
-                    'column_id': 'NAME',  # Zmieniono na 'NAME'
-                    'filter_query': '{{NAME}} = "{}"'.format(name)  # Zaktualizowano format
-                },
-                'backgroundColor': 'red'
-            } for name in red_values
-        ]
-    )
+# Model
+model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
+model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
 
-if __name__ == '__main__':
-    app.run_server(debug=True)
+# Przygotowanie danych dekodera
+y_train_dec_input = pad_sequences(y_train, maxlen=max_len_shortnames, padding='post', value=0)
+y_train_dec_output = pad_sequences(y_train, maxlen=max_len_shortnames, padding='post', value=0)
+
+# Trenowanie modelu
+model.fit([X_train, y_train_dec_input], np.expand_dims(y_train_dec_output, -1), batch_size=32, epochs=50, validation_split=0.2)
+
+# Funkcja do generowania skróconych nazw
+def generate_shortname(model, full_name):
+    full_name_seq = tokenizer.texts_to_sequences([full_name])
+    full_name_padded = pad_sequences(full_name_seq, maxlen=max_len_full_names, padding='post')
+    state = encoder_model.predict(full_name_padded)
+    
+    target_seq = np.zeros((1, 1))
+    target_seq[0, 0] = tokenizer.word_index['start']  # start token
+
+    stop_condition = False
+    shortname = ''
+    while not stop_condition:
+        output_tokens, h, c = decoder_model.predict([target_seq] + state)
+
+        # Sample a token
+        sampled_token_index = np.argmax(output_tokens[0, -1, :])
+        sampled_char = reverse_word_index[sampled_token_index]
+        shortname += sampled_char
+
+        # Exit condition: either hit max length or find stop character.
+        if (sampled_char == 'end' or len(shortname) > max_len_shortnames):
+            stop_condition = True
+
+        # Update the target sequence (of length 1).
+        target_seq = np.zeros((1, 1))
+        target_seq[0, 0] = sampled_token_index
+
+        # Update states
+        state = [h, c]
+
+    return shortname
+
+# Przykład użycia
+print(generate_shortname(model, 'Nowa Firma XYZ'))
