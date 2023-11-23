@@ -80,7 +80,7 @@ def generate_shortname(model, full_name):
     state_values = encoder_model.predict(full_name_padded)
     
     target_seq = np.zeros((1, 1))
-    target_seq[0, 0] = tokenizer.word_index['start']  # start token
+    target_seq[0, 0] = tokenizer.word_index['start']  # Token 'start'
 
     stop_condition = False
     shortname = ''
@@ -90,11 +90,9 @@ def generate_shortname(model, full_name):
         # Wybór tokenu
         sampled_token_index = np.argmax(output_tokens[0, -1, :])
         sampled_char = [word for word, index in tokenizer.word_index.items() if index == sampled_token_index][0]
+        if sampled_char == 'end':
+            break  # Koniec sekwencji
         shortname += sampled_char
-
-        # Warunek zakończenia
-        if (sampled_char == 'end' or len(shortname) > max_len_shortnames):
-            stop_condition = True
 
         # Aktualizacja sekwencji celu
         target_seq = np.zeros((1, 1))
