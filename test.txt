@@ -74,14 +74,19 @@ decoder_model = Model(
     [decoder_outputs2] + decoder_states2)
 
 # Funkcja do generowania skróconych nazw
-def generate_shortname(model, full_name):
+def generate_shortname(model, full_name, max_length=20):
+    # Przekształcenie pełnej nazwy na sekwencję
     full_name_seq = tokenizer.texts_to_sequences([full_name])
     full_name_padded = pad_sequences(full_name_seq, maxlen=max_len_full_names, padding='post')
-    state_values = encoder_model.predict(full_name_padded)
     
-    target_seq = np.zeros((1, 1))
-    target_seq[0, 0] = tokenizer.word_index['start']  # Token 'start'
+    # Pobranie stanu początkowego od enkodera
+    state_values = encoder_model.predict(full_name_padded)
 
+    # Inicjalizacja sekwencji wejściowej dekodera (start token)
+    target_seq = np.zeros((1, 1))
+    target_seq[0, 0] = tokenizer.word_index[start_token]  # Użycie start tokena
+
+    # Generowanie shortname
     stop_condition = False
     shortname = ''
     while not stop_condition:
@@ -90,9 +95,12 @@ def generate_shortname(model, full_name):
         # Wybór tokenu
         sampled_token_index = np.argmax(output_tokens[0, -1, :])
         sampled_char = [word for word, index in tokenizer.word_index.items() if index == sampled_token_index][0]
-        if sampled_char == 'end':
-            break  # Koniec sekwencji
-        shortname += sampled_char
+
+        # Sprawdzenie, czy osiągnięto token 'end' lub limit długości
+        if sampled_char == end_token or len(shortname) > max_length:
+            stop_condition = True
+        else:
+            shortname += sampled_char
 
         # Aktualizacja sekwencji celu
         target_seq = np.zeros((1, 1))
@@ -102,6 +110,5 @@ def generate_shortname(model, full_name):
         state_values = [h, c]
 
     return shortname
-
 # Przykład użycia
 print(generate_shortname(model, 'Nowa Firma XYZ'))
