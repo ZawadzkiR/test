@@ -1,114 +1,75 @@
-import numpy as np
-import tensorflow as tf
-from sklearn.model_selection import train_test_split
-from tensorflow.keras.layers import Input, LSTM, Embedding, Dense
-from tensorflow.keras.models import Model
-from tensorflow.keras.preprocessing.text import Tokenizer
-from tensorflow.keras.preprocessing.sequence import pad_sequences
-
-# Przykładowe dane (zastąp je swoimi danymi)
-full_names = ['Spółka XYZ w Pcimiu', 'Inna Firma AB', ...]
-shortnames = ['XYZ-PCI', 'IF-AB', ...]
-
-# Tokenizacja i padding
-tokenizer = Tokenizer(char_level=True)
-tokenizer.fit_on_texts(full_names + shortnames)
-full_names_seq = tokenizer.texts_to_sequences(full_names)
-shortnames_seq = tokenizer.texts_to_sequences(shortnames)
-
-full_names_padded = pad_sequences(full_names_seq, padding='post')
-shortnames_padded = pad_sequences(shortnames_seq, padding='post')
-
-# Rozmiar słownika i długości sekwencji
-vocab_size = len(tokenizer.word_index) + 1
-max_len_full_names = max([len(seq) for seq in full_names_seq])
-max_len_shortnames = max([len(seq) for seq in shortnames_seq])
-
-# Podział na zestaw treningowy i testowy
-X_train, X_test, y_train, y_test = train_test_split(full_names_padded, shortnames_padded, test_size=0.2)
-
-# Budowa modelu seq2seq
-# Enkoder
-encoder_inputs = Input(shape=(None,))
-enc_emb = Embedding(vocab_size, 10)(encoder_inputs)
-encoder_lstm = LSTM(50, return_state=True)
-encoder_outputs, state_h, state_c = encoder_lstm(enc_emb)
-encoder_states = [state_h, state_c]
-
-# Dekoder
-decoder_inputs = Input(shape=(None,))
-dec_emb_layer = Embedding(vocab_size, 10)
-dec_emb = dec_emb_layer(decoder_inputs)
-decoder_lstm = LSTM(50, return_sequences=True, return_state=True)
-decoder_outputs, _, _ = decoder_lstm(dec_emb, initial_state=encoder_states)
-decoder_dense = Dense(vocab_size, activation='softmax')
-decoder_outputs = decoder_dense(decoder_outputs)
-
-# Model
-model = Model([encoder_inputs, decoder_inputs], decoder_outputs)
-model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy')
-
-# Przygotowanie danych dekodera
-y_train_dec_input = pad_sequences(y_train, maxlen=max_len_shortnames, padding='post', value=0)
-y_train_dec_output = pad_sequences(y_train, maxlen=max_len_shortnames, padding='post', value=0)
-
-# Trenowanie modelu
-model.fit([X_train, y_train_dec_input], np.expand_dims(y_train_dec_output, -1), batch_size=32, epochs=50, validation_split=0.2)
-
-# Model enkodera
-encoder_model = Model(encoder_inputs, encoder_states)
-
-# Model dekodera
-decoder_state_input_h = Input(shape=(50,))
-decoder_state_input_c = Input(shape=(50,))
-decoder_states_inputs = [decoder_state_input_h, decoder_state_input_c]
-
-dec_emb2 = dec_emb_layer(decoder_inputs)  # Ponowne użycie warstwy Embedding
-
-decoder_outputs2, state_h2, state_c2 = decoder_lstm(dec_emb2, initial_state=decoder_states_inputs)
-decoder_states2 = [state_h2, state_c2]
-decoder_outputs2 = decoder_dense(decoder_outputs2)
-
-decoder_model = Model(
-    [decoder_inputs] + decoder_states_inputs,
-    [decoder_outputs2] + decoder_states2)
-
-# Funkcja do generowania skróconych nazw
-def generate_shortname(model, full_name, max_length=20):
-    # Przekształcenie pełnej nazwy na sekwencję
-    full_name_seq = tokenizer.texts_to_sequences([full_name])
-    full_name_padded = pad_sequences(full_name_seq, maxlen=max_len_full_names, padding='post')
+import traceback
+import io
+import json
+import pandas as pd
+from datetime import datetime
+class logger:
+    def __init__(self, logs_path):
+        self.logs_path = logs_path
+        try:
+            with open(self.logs_path, 'r') as file:
+                self.logs = json.load(file)
+        except FileNotFoundError:
+                self.logs = {}
+        return 
     
-    # Pobranie stanu początkowego od enkodera
-    state_values = encoder_model.predict(full_name_padded)
+    def process_error(self,proc_name,  e):
+        self.proc_name = proc_name
 
-    # Inicjalizacja sekwencji wejściowej dekodera (start token)
-    target_seq = np.zeros((1, 1))
-    target_seq[0, 0] = tokenizer.word_index[start_token]  # Użycie start tokena
+        if self.proc_name not in self.logs:
+            self.logs[self.proc_name] = {}
 
-    # Generowanie shortname
-    stop_condition = False
-    shortname = ''
-    while not stop_condition:
-        output_tokens, h, c = decoder_model.predict([target_seq] + state_values)
+        error_string = io.StringIO()
+        traceback.print_exception(type(e), e, e.__traceback__, file=error_string)
+        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'FAIL', 'ERROR': error_string.getvalue()}
 
-        # Wybór tokenu
-        sampled_token_index = np.argmax(output_tokens[0, -1, :])
-        sampled_char = [word for word, index in tokenizer.word_index.items() if index == sampled_token_index][0]
+        json.dump(self.logs,open(self.logs_path, 'w'))
+    def process_ok(self, proc_name):
 
-        # Sprawdzenie, czy osiągnięto token 'end' lub limit długości
-        if sampled_char == end_token or len(shortname) > max_length:
-            stop_condition = True
-        else:
-            shortname += sampled_char
+        self.proc_name = proc_name
+        if self.proc_name not in self.logs:
+            self.logs[self.proc_name] = {}
+        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'OK', 'ERROR': ''}
+        json.dump(self.logs,open(self.logs_path, 'w'))
 
-        # Aktualizacja sekwencji celu
-        target_seq = np.zeros((1, 1))
-        target_seq[0, 0] = sampled_token_index
 
-        # Aktualizacja stanów
-        state_values = [h, c]
 
-    return shortname
-# Przykład użycia
-print(generate_shortname(model, 'Nowa Firma XYZ'))
+
+    def action_error(self,proc_name, value, e):
+        self.proc_name = proc_name
+        self.value = value
+
+        if self.proc_name not in self.logs:
+            self.logs[self.proc_name] = {}
+
+        error_string = io.StringIO()
+        traceback.print_exception(type(e), e, e.__traceback__, file=error_string)
+        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'VALUE': self.value,'RESULT': 'FAIL', 'ERROR': error_string.getvalue()}
+
+        json.dump(self.logs,open(self.logs_path, 'w'))
+
+    def action_ok(self, value, proc_name):
+
+        self.proc_name = proc_name
+        self.value = value
+
+        if self.proc_name not in self.logs:
+            self.logs[self.proc_name] = {}
+        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'OK', 'ERROR': ''}
+        json.dump(self.logs,open(self.logs_path, 'w'))
+
+    def make_process_df(self):
+        records = []
+        for process, timestamps in self.logs.items():
+            for timestamp, data in timestamps.items():
+                record = {'Process': process, 'Datetime': timestamp, 'Result': data['RESULT'], 'Error': data['ERROR']}
+                records.append(record)
+        return pd.DataFrame(records)
+
+    def make_action_df(self):
+        records = []
+        for process, timestamps in self.logs.items():
+            for timestamp, data in timestamps.items():
+                record = {'Process': process, 'Datetime': timestamp, 'Value': data['VALUE'],'Result': data['RESULT'], 'Error': data['ERROR']}
+                records.append(record)
+        return pd.DataFrame(records)
