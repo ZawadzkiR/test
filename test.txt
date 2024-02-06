@@ -1,75 +1,21 @@
-import traceback
-import io
-import json
-import pandas as pd
-from datetime import datetime
-class logger:
-    def __init__(self, logs_path):
-        self.logs_path = logs_path
-        try:
-            with open(self.logs_path, 'r') as file:
-                self.logs = json.load(file)
-        except FileNotFoundError:
-                self.logs = {}
-        return 
-    
-    def process_error(self,proc_name,  e):
-        self.proc_name = proc_name
+import math
 
-        if self.proc_name not in self.logs:
-            self.logs[self.proc_name] = {}
+def funkcja(temp, data, name, num_val, **kwargs):
+    if isinstance(data, dict):
+        records = [data]
+    elif hasattr(data, 'to_dict'):  # Sprawdzenie, czy data ma metodę to_dict
+        records = data.to_dict('records')
+    else:
+        raise ValueError("Nieobsługiwany typ danych")
 
-        error_string = io.StringIO()
-        traceback.print_exception(type(e), e, e.__traceback__, file=error_string)
-        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'FAIL', 'ERROR': error_string.getvalue()}
+    number_of_files = math.ceil(len(records) / num_val)
+    for i in range(number_of_files):
+        chunk = records[i * num_val: (i + 1) * num_val]  # Wyciągnij odpowiednią część danych
+        with open(f'{name}_{i}.txt', 'a+') as file:
+            for record in chunk:
+                file.write(temp.format(**{k: record.get(v, '') for k, v in kwargs.items()}))
 
-        json.dump(self.logs,open(self.logs_path, 'w'))
-    def process_ok(self, proc_name):
-
-        self.proc_name = proc_name
-        if self.proc_name not in self.logs:
-            self.logs[self.proc_name] = {}
-        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'OK', 'ERROR': ''}
-        json.dump(self.logs,open(self.logs_path, 'w'))
-
-
-
-
-    def action_error(self,proc_name, value, e):
-        self.proc_name = proc_name
-        self.value = value
-
-        if self.proc_name not in self.logs:
-            self.logs[self.proc_name] = {}
-
-        error_string = io.StringIO()
-        traceback.print_exception(type(e), e, e.__traceback__, file=error_string)
-        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'VALUE': self.value,'RESULT': 'FAIL', 'ERROR': error_string.getvalue()}
-
-        json.dump(self.logs,open(self.logs_path, 'w'))
-
-    def action_ok(self, value, proc_name):
-
-        self.proc_name = proc_name
-        self.value = value
-
-        if self.proc_name not in self.logs:
-            self.logs[self.proc_name] = {}
-        self.logs[self.proc_name][datetime.now().strftime('%Y-%m-%d %H:%M:%S')] = {'RESULT': 'OK', 'ERROR': ''}
-        json.dump(self.logs,open(self.logs_path, 'w'))
-
-    def make_process_df(self):
-        records = []
-        for process, timestamps in self.logs.items():
-            for timestamp, data in timestamps.items():
-                record = {'Process': process, 'Datetime': timestamp, 'Result': data['RESULT'], 'Error': data['ERROR']}
-                records.append(record)
-        return pd.DataFrame(records)
-
-    def make_action_df(self):
-        records = []
-        for process, timestamps in self.logs.items():
-            for timestamp, data in timestamps.items():
-                record = {'Process': process, 'Datetime': timestamp, 'Value': data['VALUE'],'Result': data['RESULT'], 'Error': data['ERROR']}
-                records.append(record)
-        return pd.DataFrame(records)
+# Przykład użycia funkcji
+temp = "Numer {NUMER} Nazwa: {NAZWA}\n"
+data = {'NUMER': 1, 'NAZWA': 'Przykładowa nazwa'}
+funkcja(temp, data, 'plik', 1, NUMER='NUMER', NAZWA='NAZWA')
